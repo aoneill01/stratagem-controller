@@ -1,6 +1,7 @@
 #include <Encoder.h>
 #include "Keyboard.h"
 #include <U8g2lib.h>
+#include <EEPROM.h>
 
 #ifdef U8X8_HAVE_HW_SPI
 #include <SPI.h>
@@ -10,6 +11,7 @@
 #endif
 
 #define ARM_PIN 5
+#define ARM_LED_PIN 6
 #define BTN_1_PIN 9
 #define BTN_2_PIN 10
 #define BTN_3_PIN 16
@@ -201,29 +203,71 @@ void setup() {
 
   u8g2.begin();
   drawLogo();
+
+  pinMode(ARM_PIN, INPUT_PULLUP);
+  // pinMode(ARM_LED_PIN, OUTPUT);
+  digitalWrite(ARM_LED_PIN, LOW);
+
+  EEPROM.get(0, selectedStratagems);
 }
 
 char stratagem[] = {'w', 's', 'd', 'a', 'w'};
 long stratagemIndex  = 0;
+int selectedButton = -1;
+bool lastWasArmed = false;
+int lastStratagem = 0;
 
 // the loop function runs over and over again forever
 void loop() {
+  if (digitalRead(ARM_PIN) == LOW) {
+    armedLoop(!lastWasArmed);
+    lastWasArmed = true;
+  } else {
+    unarmedLoop(lastWasArmed);
+    lastWasArmed = false;
+  }
+}
+
+void armedLoop(bool justSwitched) {
+  // digitalWrite(ARM_LED_PIN, HIGH);
+  if (justSwitched) {
+    Serial.println("Armed");
+    drawLogo();
+    EEPROM.put(0, selectedStratagems);
+    delay(50);
+  }
+
   for (int i = 0; i < BTN_COUNT; i++) {
-    byte buttonState = digitalRead(btnPins[i]);
-    if (buttonState == LOW) {
+    digitalWrite(ledPins[i], LOW);
+
+    if (digitalRead(btnPins[i]) == LOW) {
       digitalWrite(ledPins[i], HIGH);
       drawStratagem(selectedStratagems[i]);
       inputStratagem(selectedStratagems[i]);
       delay(500);
-      digitalWrite(ledPins[i], LOW);
+
       drawLogo();
     }
   }
+}
 
-  long newStratagemIndex = stratagemId();
-  if (newStratagemIndex != stratagemIndex) {
-    stratagemIndex = newStratagemIndex;
-    drawStratagem(newStratagemIndex);
+void unarmedLoop(bool justSwitched) {
+  // digitalWrite(ARM_LED_PIN, LOW);
+
+  for (int i = 0; i < BTN_COUNT; i++) {
+    digitalWrite(ledPins[i], i == selectedButton ? HIGH : LOW);
+    if (digitalRead(btnPins[i]) == LOW) {
+      selectedButton = i;
+      enc.write(4 * selectedStratagems[selectedButton]);
+    }
+  }
+
+  if (selectedButton < 0) return;
+
+  selectedStratagems[selectedButton] = stratagemId();
+  if (selectedStratagems[selectedButton] != lastStratagem || justSwitched) {
+    lastStratagem = selectedStratagems[selectedButton];
+    drawStratagem(selectedStratagems[selectedButton]);
   }
 }
 
@@ -265,15 +309,17 @@ void drawLogo() {
 }
 
 void inputStratagem(int i) {
-    Keyboard.press(KEY_LEFT_CTRL);
-    delay(100);
-    int keysLength = strlen_P(stratagems[i].keys);
-    for (byte k = 0; k < keysLength; k++) {
-      char myChar = pgm_read_byte_near(stratagems[i].keys + k);
-      Keyboard.press(myChar);
-      delay(50);
-      Keyboard.release(myChar);
-      delay(50);
-    }
-    Keyboard.release(KEY_LEFT_CTRL);
+  Serial.println("Sending stratagem");
+
+  Keyboard.press(KEY_LEFT_CTRL);
+  delay(100);
+  int keysLength = strlen_P(stratagems[i].keys);
+  for (byte k = 0; k < keysLength; k++) {
+    char myChar = pgm_read_byte_near(stratagems[i].keys + k);
+    Keyboard.press(myChar);
+    delay(50);
+    Keyboard.release(myChar);
+    delay(50);
+  }
+  Keyboard.release(KEY_LEFT_CTRL);
 }
